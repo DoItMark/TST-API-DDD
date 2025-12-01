@@ -3,13 +3,25 @@ Item Management API - Domain-Driven Design Implementation
 Based on Listing Aggregate Root from ItemManagement_ClassDiagram
 """
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from enum import Enum
 from uuid import UUID, uuid4
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timedelta
+import jwt
+from passlib.context import CryptContext
+
+
+# Security Configuration
+SECRET_KEY = "your-secret-key-change-in-production-min-32-chars-long"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+security = HTTPBearer()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # Enums
@@ -155,6 +167,33 @@ class Listing(BaseModel):
         return min(score, 10.0)
 
 
+# User Models
+class User(BaseModel):
+    user_id: UUID = Field(default_factory=uuid4)
+    username: str
+    hashed_password: str
+    seller_id: UUID = Field(default_factory=uuid4)
+
+
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6)
+
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+
 # Request/Response Models
 class CreateListingRequest(BaseModel):
     seller_id: UUID
@@ -187,6 +226,68 @@ class ListingResponse(BaseModel):
 # In-memory storage (replace with database in production)
 listings_db: dict[UUID, Listing] = {}
 search_index_db: dict[UUID, SearchIndexModel] = {}
+users_db: dict[str, User] = {}
+
+
+# Security Functions
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    """Hash a password"""
+    return pwd_context.hash(password)
+
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT access token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+def get_user(username: str) -> Optional[User]:
+    """Get user from database"""
+    return users_db.get(username)
+
+
+def authenticate_user(username: str, password: str) -> Optional[User]:
+    """Authenticate a user"""
+    user = get_user(username)
+    if not user:
+        return None
+    if not verify_password(password, user.hashed_password):
+        return None
+    return user
+
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+    """Get current user from JWT token"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except jwt.PyJWTError:
+        raise credentials_exception
+    
+    user = get_user(username=token_data.username)
+    if user is None:
+        raise credentials_exception
+    return user
 
 
 # FastAPI Application
@@ -197,11 +298,56 @@ app = FastAPI(
 )
 
 
+@app.post("/register", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def register_user(user_data: UserCreate):
+    """Register a new user"""
+    if user_data.username in users_db:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered"
+        )
+    
+    user = User(
+        username=user_data.username,
+        hashed_password=get_password_hash(user_data.password)
+    )
+    users_db[user.username] = user
+    
+    return {
+        "message": "User registered successfully",
+        "user_id": str(user.user_id),
+        "seller_id": str(user.seller_id)
+    }
+
+
+@app.post("/login", response_model=Token)
+async def login(user_data: UserLogin):
+    """Login and get access token"""
+    user = authenticate_user(user_data.username, user_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
 @app.post("/listings", response_model=ListingResponse, status_code=status.HTTP_201_CREATED)
-async def create_listing(request: CreateListingRequest):
-    """Create a new listing"""
+async def create_listing(
+    request: CreateListingRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new listing (requires authentication)"""
+    # Use the authenticated user's seller_id
     listing = Listing(
-        seller_id=request.seller_id,
+        seller_id=current_user.seller_id,
         title=request.title,
         price=request.price,
         condition=request.condition,
@@ -256,8 +402,11 @@ async def list_listings(
 
 
 @app.patch("/listings/{listing_id}/activate", response_model=ListingResponse)
-async def activate_listing(listing_id: UUID):
-    """Activate a listing"""
+async def activate_listing(
+    listing_id: UUID,
+    current_user: User = Depends(get_current_user)
+):
+    """Activate a listing (requires authentication)"""
     if listing_id not in listings_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -265,6 +414,14 @@ async def activate_listing(listing_id: UUID):
         )
     
     listing = listings_db[listing_id]
+    
+    # Check if user owns this listing
+    if listing.seller_id != current_user.seller_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only activate your own listings"
+        )
+    
     try:
         listing.activate_listing()
     except ValueError as e:
@@ -277,8 +434,12 @@ async def activate_listing(listing_id: UUID):
 
 
 @app.patch("/listings/{listing_id}/delist", response_model=ListingResponse)
-async def delist_listing(listing_id: UUID, request: DelistRequest):
-    """Delist a listing"""
+async def delist_listing(
+    listing_id: UUID,
+    request: DelistRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Delist a listing (requires authentication)"""
     if listing_id not in listings_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -286,6 +447,14 @@ async def delist_listing(listing_id: UUID, request: DelistRequest):
         )
     
     listing = listings_db[listing_id]
+    
+    # Check if user owns this listing
+    if listing.seller_id != current_user.seller_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delist your own listings"
+        )
+    
     try:
         listing.delist_listing(request.reason)
     except ValueError as e:
@@ -298,8 +467,12 @@ async def delist_listing(listing_id: UUID, request: DelistRequest):
 
 
 @app.patch("/listings/{listing_id}/price", response_model=ListingResponse)
-async def update_listing_price(listing_id: UUID, request: UpdatePriceRequest):
-    """Update listing price"""
+async def update_listing_price(
+    listing_id: UUID,
+    request: UpdatePriceRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Update listing price (requires authentication)"""
     if listing_id not in listings_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -307,6 +480,14 @@ async def update_listing_price(listing_id: UUID, request: UpdatePriceRequest):
         )
     
     listing = listings_db[listing_id]
+    
+    # Check if user owns this listing
+    if listing.seller_id != current_user.seller_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update price of your own listings"
+        )
+    
     try:
         listing.update_price(request.new_price)
     except ValueError as e:
@@ -323,12 +504,24 @@ async def update_listing_price(listing_id: UUID, request: UpdatePriceRequest):
 
 
 @app.delete("/listings/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_listing(listing_id: UUID):
-    """Delete a listing"""
+async def delete_listing(
+    listing_id: UUID,
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a listing (requires authentication)"""
     if listing_id not in listings_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Listing {listing_id} not found"
+        )
+    
+    listing = listings_db[listing_id]
+    
+    # Check if user owns this listing
+    if listing.seller_id != current_user.seller_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete your own listings"
         )
     
     del listings_db[listing_id]

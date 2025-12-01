@@ -1,0 +1,77 @@
+digraph ItemManagement_UL_Diagram {
+    // Graph and Node Configuration
+    rankdir=LR;
+    splines=polyline;
+    node [shape=record, style="rounded,filled", fillcolor="#FFD700", fontname="Arial", color="#333333"];
+    edge [fontname="Arial", fontsize=10];
+
+    // 1. Core Aggregate (Listing Catalog)
+    Listing [
+        label = "{<<Aggregate Root>>\|**Listing**\n(Source of Truth)\|+ ListingId : UUID\n+ SellerId : UUID\n+ Title : String\n+ ItemState : Enum (Active, Sold, Delisted)\n+ Price : Money\n| + activateListing()\n+ delistListing(reason: DelistReason)\n+ updatePrice(newPrice: Money)\n+ publishListingIndexedEvent()}"
+    ];
+
+    // 2. Entities & Value Objects (Listing Catalog Components)
+    Attribute [
+        label = "{<<Entity>>\|**Attribute**\n(Non-Standard Item Detail)\n+ AttributeId : UUID\n+ Name : String\n+ Value : String\n| + updateValue()}"
+    ];
+
+    Condition [
+        label = "{<<Value Object>>\|**Condition**\n(Item Variant)\n+ Score : Integer\n+ DetailedDescription : String\n+ KnownDefects : List<String>}"
+    ];
+
+    Money [
+        label = "{<<Value Object>>\|**Money**\n+ Amount : Decimal\n+ Currency : String}"
+    ];
+    
+    DelistReason [
+        label = "{<<Value Object>>\|**DelistReason**\n(Why an item is removed)\n+ ReasonType : Enum\n+ Detail : String}"
+    ];
+
+    // 3. Read Model (Listing Search Components)
+    SearchIndexModel [
+        label = "{<<Read Model>>\|**SearchIndexModel**\n(Optimized for Discovery Query)\n+ IndexId : UUID (ListingId)\n+ SearchableText : String\n+ RelevanceScore : Double\n+ SearchFilters : List<Filter>\n| + updateFromListing(listing: Listing)}"
+    ];
+    
+    Filter [
+        label = "{<<Value Object>>\|**Filter**\n(Used for Search Refinement)\n+ Name : String\n+ Value : String}"
+    ];
+    
+    // 4. Integration Component (Events)
+    ListingIndexed [
+        label = "{<<Domain Event>>\|**Listing Indexed**\n+ ListingId : UUID\n+ RelevanceScore : Double\n+ ItemState : Enum}"
+    ];
+
+
+    // 5. Relationships
+
+    // Composition (Solid diamond) - Entities owned by Listing
+    Listing -> Attribute [label="1..*" headlabel="", taillabel="", arrowhead="none", style="bold", dir="none"];
+
+    // Aggregation (Hollow diamond) - Value Objects part of Listing
+    Listing -> Money [label="1" headlabel="", taillabel="", arrowhead="none", style="dashed", dir="none"];
+    Listing -> Condition [label="1" headlabel="", taillabel="", arrowhead="none", style="dashed", dir="none"]; 
+    
+    // Dependency/Usage (Dashed arrow)
+    Listing -> DelistReason [label="" style="dashed", arrowhead="open"];
+    SearchIndexModel -> Filter [label="1..*" headlabel="", taillabel="", arrowhead="none", style="dashed", dir="none"];
+    
+    // Indexing (Creation/Transformation)
+    Listing -> SearchIndexModel [label="builds / indexes" style="dotted", arrowhead="normal", fontcolor="#006400"];
+    
+    // Events (Output from Aggregate)
+    Listing -> ListingIndexed [label="publishes" style="dashed", arrowhead="normal", color=red, fontcolor=red];
+
+
+    // Legend (for clarity)
+    subgraph cluster_legend {
+        label = "Ubiquitous Language (UL) Legend";
+        bgcolor = "#EEEEEE";
+        Aggregation [label = "<<Aggregation>>", shape=none];
+        Composition [label = "<<Composition>>", shape=none];
+        Event [label = "<<Domain Event>>", shape=none];
+        
+        Aggregation -> Money [label="" dir="none", style="dashed"];
+        Composition -> Attribute [label="" dir="none", style="bold"];
+        ListingIndexed_node [label="Listing Indexed" shape=box, color=red, fillcolor=white, style="filled"];
+    }
+}

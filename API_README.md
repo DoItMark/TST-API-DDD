@@ -5,6 +5,9 @@ This is a Python FastAPI implementation based on the Listing Aggregate from the 
 ## Features
 
 - **Domain-Driven Design**: Implements Aggregate Root pattern with Listing as the source of truth
+- **JWT Authentication**: Secure API endpoints with JSON Web Tokens
+- **Password Hashing**: Bcrypt-based password security
+- **Authorization**: Owner-based access control for listings
 - **Value Objects**: Money, Condition, DelistReason, Filter
 - **Entities**: Attribute
 - **Domain Events**: ListingIndexedEvent
@@ -37,6 +40,20 @@ Once running, visit:
 - **ReDoc**: http://localhost:8000/redoc
 
 ## API Endpoints
+
+### Authentication
+
+#### Register User
+```
+POST /register
+```
+
+#### Login
+```
+POST /login
+```
+
+### Listings (Protected - Requires JWT Token)
 
 ### Create Listing
 ```
@@ -85,12 +102,40 @@ GET /health
 
 ## Example Usage
 
-### Create a Listing
+### Register a User
+```bash
+curl -X POST "http://localhost:8000/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "john_doe",
+    "password": "securepassword123"
+  }'
+```
+
+### Login and Get Token
+```bash
+curl -X POST "http://localhost:8000/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "john_doe",
+    "password": "securepassword123"
+  }'
+```
+
+Response:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+### Create a Listing (with JWT Token)
 ```bash
 curl -X POST "http://localhost:8000/listings" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -d '{
-    "seller_id": "123e4567-e89b-12d3-a456-426614174000",
     "title": "Vintage Camera",
     "price": {
       "amount": 299.99,
@@ -114,10 +159,11 @@ curl -X POST "http://localhost:8000/listings" \
   }'
 ```
 
-### Update Price
+### Update Price (with JWT Token)
 ```bash
 curl -X PATCH "http://localhost:8000/listings/{listing_id}/price" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -d '{
     "new_price": {
       "amount": 249.99,
@@ -126,10 +172,11 @@ curl -X PATCH "http://localhost:8000/listings/{listing_id}/price" \
   }'
 ```
 
-### Delist a Listing
+### Delist a Listing (with JWT Token)
 ```bash
 curl -X PATCH "http://localhost:8000/listings/{listing_id}/delist" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -d '{
     "reason": {
       "reason_type": "SellerRequest",
@@ -153,5 +200,9 @@ The API implements the following domain concepts:
 ## Notes
 
 - Currently uses in-memory storage (replace with a database for production)
+- **Change SECRET_KEY in production!** Use a secure random key (min 32 characters)
+- JWT tokens expire after 30 minutes (configurable)
+- Protected endpoints require Bearer token in Authorization header
+- Users can only modify their own listings (ownership check)
 - Events are generated but not persisted (implement event store for production)
 - Search functionality is basic (integrate with Elasticsearch for production)
