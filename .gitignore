@@ -41,3 +41,8 @@ htmlcov/
 # Misc
 .DS_Store
 *.log
+
+# Additional testing artifacts
+.tox/
+*.cover
+.hypothesis/
