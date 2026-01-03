@@ -11,14 +11,15 @@ from enum import Enum
 from uuid import UUID, uuid4
 from decimal import Decimal
 from datetime import datetime, timedelta
+import os
 import jwt
 from passlib.context import CryptContext
 
 
-# Security Configuration
-SECRET_KEY = "your-secret-key-change-in-production-min-32-chars-long"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Security Configuration - Production Ready
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production-min-32-chars-long")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
 security = HTTPBearer()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
