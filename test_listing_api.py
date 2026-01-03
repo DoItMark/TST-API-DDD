@@ -496,11 +496,12 @@ class TestSearchFunctionality:
             assert item["relevance_score"] >= 1.0
 
     @pytest.mark.search
-    def test_search_returns_correct_results(self, client, auth_headers):
+    def test_search_returns_correct_results(self, client, auth_headers, registered_user):
         """Test search returns correct and sorted results"""
         # Arrange - Create multiple listings
+        seller_id = registered_user["user_data"]["seller_id"]
         listing1 = {
-            "seller_id": str(uuid4()),
+            "seller_id": seller_id,
             "title": "Vintage Camera",
             "price": {"amount": "299.99", "currency": "USD"},
             "condition": {
@@ -511,7 +512,7 @@ class TestSearchFunctionality:
             "attributes": []
         }
         listing2 = {
-            "seller_id": str(uuid4()),
+            "seller_id": seller_id,
             "title": "Modern Laptop",
             "price": {"amount": "999.99", "currency": "USD"},
             "condition": {
@@ -579,11 +580,12 @@ class TestEdgeCases:
     """Test suite for edge cases and error handling"""
 
     @pytest.mark.listings
-    def test_create_listing_with_minimal_data(self, client, auth_headers):
+    def test_create_listing_with_minimal_data(self, client, auth_headers, registered_user):
         """Test creating a listing with minimal required data"""
         # Arrange
+        seller_id = registered_user["user_data"]["seller_id"]
         minimal_listing = {
-            "seller_id": str(uuid4()),
+            "seller_id": seller_id,
             "title": "Item",
             "price": {"amount": "10.00", "currency": "USD"},
             "condition": {
