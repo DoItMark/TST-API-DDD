@@ -37,9 +37,6 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
-.tox/
-*.cover
-.hypothesis/
 
 # Misc
 .DS_Store
